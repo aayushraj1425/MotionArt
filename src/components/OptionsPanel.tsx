@@ -16,6 +16,7 @@ const controls: { key: keyof AnimeOptions; label: string; hint: string; values: 
   { key: 'fps', label: 'Frames per second', hint: 'Higher gives smoother motion but more processing.', values: [6, 12, 24] },
   { key: 'maxWidth', label: 'Resolution (longest side)', hint: 'Use 720 or 1080 for small facial features. Higher takes longer; cannot restore detail missing from the source.', values: [480, 640, 720, 1080] },
   { key: 'clipSeconds', label: 'First seconds to process', hint: 'Longer videos are trimmed to this duration. Output has no audio.', values: [2, 5, 10] },
+  { key: 'temporalStrength', label: 'Motion smoothing', hint: 'Python engine: blends each frame along motion with the previous one to reduce flicker. Higher is steadier; too high can smear fast motion.', values: [0, 0.3, 0.6, 0.85] },
 ];
 
 export function OptionsPanel({ options, onChange }: { options: AnimeOptions; onChange: (options: AnimeOptions) => void }) {
