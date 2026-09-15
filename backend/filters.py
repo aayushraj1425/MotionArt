@@ -52,3 +52,50 @@ def stylize(frame: np.ndarray, options: AnimeOptions) -> np.ndarray:
     if options.saturation == 0:
         output = cv2.cvtColor(cv2.cvtColor(output, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
     return output
+
+
+class VideoStylizer:
+    """Stylizes a frame sequence with optical-flow temporal smoothing.
+
+    Independent per-frame stylization flickers: quantized shading bands and
+    palette tints jump between frames. This warps the previous *stylized*
+    frame onto the current one (dense Farneback flow, computed at half
+    resolution for speed) and blends the two only where the warped source
+    still matches — so motion boundaries and scene cuts fall back to the
+    fresh frame instead of ghosting.
+    """
+
+    def __init__(self, options: AnimeOptions):
+        self.options = options
+        self.prev_gray: np.ndarray | None = None
+        self.prev_output: np.ndarray | None = None
+
+    def process(self, frame: np.ndarray) -> np.ndarray:
+        output = stylize(frame, self.options)
+        strength = min(self.options.temporalStrength, 0.85)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if strength > 0 and self.prev_gray is not None and self.prev_gray.shape == gray.shape:
+            output = self._blend_with_previous(gray, output, strength)
+        self.prev_gray, self.prev_output = gray, output
+        return output
+
+    def _blend_with_previous(self, gray: np.ndarray, output: np.ndarray, strength: float) -> np.ndarray:
+        h, w = gray.shape
+        small = (max(2, w // 2), max(2, h // 2))
+        # Backward flow (current -> previous) lets a plain remap pull each
+        # current pixel from where it came from in the previous frame.
+        flow = cv2.calcOpticalFlowFarneback(
+            cv2.resize(gray, small, interpolation=cv2.INTER_AREA),
+            cv2.resize(self.prev_gray, small, interpolation=cv2.INTER_AREA),
+            None, 0.5, 3, 15, 3, 5, 1.1, 0)
+        flow = cv2.resize(flow, (w, h), interpolation=cv2.INTER_LINEAR) * (w / small[0], h / small[1])
+        grid_x, grid_y = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+        # remap requires CV_32FC1 maps; the flow scaling above promotes to float64.
+        map_x = (grid_x + flow[:, :, 0]).astype(np.float32)
+        map_y = (grid_y + flow[:, :, 1]).astype(np.float32)
+        warped_output = cv2.remap(self.prev_output, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        warped_gray = cv2.remap(self.prev_gray, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        # Trust the history only where the warped luminance still matches.
+        mismatch = cv2.absdiff(warped_gray, gray).astype(np.float32)
+        weight = np.clip(1 - mismatch / 20, 0, 1)[:, :, None] * strength
+        return (output.astype(np.float32) * (1 - weight) + warped_output.astype(np.float32) * weight).astype(np.uint8)

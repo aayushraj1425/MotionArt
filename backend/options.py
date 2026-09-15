@@ -16,3 +16,4 @@ class AnimeOptions(BaseModel):
     celStrength: float = Field(0.8, ge=0, le=1)
     paletteStrength: float = Field(0.65, ge=0, le=1)
     clipSeconds: float = Field(5, ge=0.1, le=10)
+    temporalStrength: float = Field(0.6, ge=0, le=1)

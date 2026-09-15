@@ -7,7 +7,7 @@ import cv2
 import imageio_ffmpeg
 import numpy as np
 
-from .filters import resize_frame, stylize
+from .filters import VideoStylizer, resize_frame
 from .options import AnimeOptions
 
 
@@ -39,6 +39,7 @@ def process_video(source: Path, output: Path, options: AnimeOptions,
         source_index = -1
         frame = None
         width = height = 0
+        stylizer = VideoStylizer(options)
         for index in range(count):
             if cancelled and cancelled.is_set():
                 raise InterruptedError("Processing cancelled")
@@ -50,7 +51,7 @@ def process_video(source: Path, output: Path, options: AnimeOptions,
                 source_index += 1
             if frame is None or frame.shape[0] * frame.shape[1] > 20_000_000:
                 raise ValueError("Unsupported frame size")
-            result = stylize(resize_frame(frame, options.maxWidth), options)
+            result = stylizer.process(resize_frame(frame, options.maxWidth))
             if writer is None:
                 height, width = result.shape[:2]
                 writer = imageio_ffmpeg.write_frames(str(output / "video.mp4"), (width, height),

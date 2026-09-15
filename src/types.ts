@@ -50,6 +50,8 @@ export type AnimeOptions = {
   paletteStrength: number;
   /** Process the first N seconds, bounded to keep on-device work manageable. */
   clipSeconds: number;
+  /** Python engine only: optical-flow blend with the previous frame to reduce flicker. */
+  temporalStrength: number;
 };
 
 export const DEFAULT_OPTIONS: AnimeOptions = {
@@ -66,6 +68,7 @@ export const DEFAULT_OPTIONS: AnimeOptions = {
   celStrength: 0.8,
   paletteStrength: 0.65,
   clipSeconds: 5,
+  temporalStrength: 0.6,
 };
 
 /** Progress emitted while the pipeline runs, for UI feedback. */

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 import numpy as np
 from pydantic import ValidationError
 
-from .filters import resize_frame, stylize
+from .filters import VideoStylizer, resize_frame, stylize
 from .options import AnimeOptions
 from .pipeline import process_video
 from .server import create_app
@@ -52,6 +52,25 @@ class ProcessingTests(unittest.TestCase):
         np.testing.assert_array_equal(result[:, :, 0], result[:, :, 1])
         np.testing.assert_array_equal(result[:, :, 1], result[:, :, 2])
         self.assertEqual(resize_frame(np.zeros((1920, 1080, 3), np.uint8), 720).shape, (720, 404, 3))
+
+    def test_temporal_smoothing_reduces_flicker(self):
+        rng = np.random.default_rng(7)
+        frames = []
+        for shift in (0, 1):
+            noisy = np.roll(scene(), shift, axis=1).astype(np.int16)
+            noisy += rng.integers(-12, 13, noisy.shape, dtype=np.int16)
+            frames.append(np.clip(noisy, 0, 255).astype(np.uint8))
+        options = AnimeOptions(temporalStrength=0.8)
+        smoothed = VideoStylizer(options)
+        flicker = {
+            "independent": [stylize(frame, options) for frame in frames],
+            "smoothed": [smoothed.process(frame) for frame in frames],
+        }
+        diff = {name: np.abs(np.diff([f.astype(float) for f in outputs], axis=0)).mean()
+                for name, outputs in flicker.items()}
+        self.assertLess(diff["smoothed"], diff["independent"] * 0.8)
+        # First frame has no history, so it must equal plain stylization.
+        np.testing.assert_array_equal(flicker["smoothed"][0], flicker["independent"][0])
 
     def test_options_reject_excessive_work_and_unknown_fields(self):
         for data in ({"fps": 100}, {"maxWidth": 8000}, {"clipSeconds": 1000}, {"saturation": float('nan')}, {"unexpected": 1}):
