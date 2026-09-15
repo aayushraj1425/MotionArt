@@ -1,39 +1,24 @@
 import * as VideoThumbnails from 'expo-video-thumbnails';
+import * as FileSystem from 'expo-file-system/legacy';
+import type { AnimeOptions, PickedVideo } from '../types';
 
-import type { PickedVideo } from '../types';
-
-/** When the picker gives no duration, sample across this window instead. */
-const FALLBACK_SPAN_MS = 3000;
-
-/**
- * Owns exactly one job: turn a video into N still frames spread evenly
- * across the clip. Each frame is written to a cache file; we return the URIs.
- */
-export async function sampleFrames(
-  video: PickedVideo,
-  count: number,
-): Promise<string[]> {
-  const span = video.durationMs && video.durationMs > 0 ? video.durationMs : FALLBACK_SPAN_MS;
+export async function sampleFrames(video: PickedVideo, options: AnimeOptions, onProgress: (value: number, total: number) => void): Promise<string[]> {
+  if (!video.durationMs || video.durationMs <= 0) throw new Error('Could not read the video duration. Please select another clip.');
+  const span = Math.min(video.durationMs, options.clipSeconds * 1000);
+  const count = Math.max(1, Math.round(span * options.fps / 1000));
   const uris: string[] = [];
-
-  for (let i = 0; i < count; i++) {
-    // (i + 0.5)/count keeps us off the very first and last frame, which
-    // some decoders return black.
-    const time = Math.floor((span * (i + 0.5)) / count);
-    try {
+  onProgress(0, count);
+  try {
+    for (let i = 0; i < count; i++) {
       const { uri } = await VideoThumbnails.getThumbnailAsync(video.uri, {
-        time,
-        quality: 0.6,
+        time: Math.min(Math.floor(i * 1000 / options.fps), Math.max(0, Math.floor(span) - 1)), quality: 1,
       });
       uris.push(uri);
-    } catch {
-      // Ran past the real end of a shorter-than-expected clip — stop cleanly.
-      break;
+      onProgress(i + 1, count);
     }
+    return uris;
+  } catch {
+    await Promise.all(uris.map(uri => FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {})));
+    throw new Error('Could not read the full clip. Try a shorter duration or a different video.');
   }
-
-  if (uris.length === 0) {
-    throw new Error('Could not read any frames from this video.');
-  }
-  return uris;
 }

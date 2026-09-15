@@ -9,7 +9,10 @@ export type PickedVideo = {
   durationMs?: number;
 };
 
-/** One stylized frame, carried as a self-contained PNG data URL. */
+export type ProcessingEngine = 'python' | 'device';
+export type PythonConnection = { url: string; code: string };
+
+/** One stylized frame, as a PNG data URL or a downloaded local file URI. */
 export type StylizedFrame = {
   id: string;
   dataUrl: string; // "data:image/png;base64,...."
@@ -20,6 +23,7 @@ export type ProcessResult = {
   /** file:// URI of the encoded video the user can preview. */
   videoUri: string;
   frames: StylizedFrame[];
+  cacheDirectory?: string;
 };
 
 /** Tunables for the cartoon look and the encode. */
@@ -31,24 +35,42 @@ export type AnimeOptions = {
   edgeThreshold: number;
   /** Colour saturation multiplier. */
   saturation: number;
-  /** Frames are scaled down to at most this width before processing. */
+  /** Maximum length of either side, including portrait videos. */
   maxWidth: number;
   /** H.264 quality: lower = better (range 10–51). */
   quantizer: number;
+  smoothing: number;
+  outlineStrength: number;
+  contrast: number;
+  /** Amount of local source detail retained beneath the cel shading. */
+  detail: number;
+  /** Blend between continuous lightness and flat cel shading. */
+  celStrength: number;
+  /** Warm highlights and cool shadows for an illustrated color palette. */
+  paletteStrength: number;
+  /** Process the first N seconds, bounded to keep on-device work manageable. */
+  clipSeconds: number;
 };
 
 export const DEFAULT_OPTIONS: AnimeOptions = {
-  fps: 8,
-  levels: 5,
-  edgeThreshold: 34,
-  saturation: 1.35,
-  maxWidth: 480,
-  quantizer: 26,
+  fps: 12,
+  levels: 6,
+  edgeThreshold: 18,
+  saturation: 1.5,
+  maxWidth: 720,
+  quantizer: 20,
+  smoothing: 1,
+  outlineStrength: 0.75,
+  contrast: 1.1,
+  detail: 1,
+  celStrength: 0.8,
+  paletteStrength: 0.65,
+  clipSeconds: 5,
 };
 
 /** Progress emitted while the pipeline runs, for UI feedback. */
 export type ProcessProgress = {
-  stage: 'loading' | 'stylizing' | 'encoding';
+  stage: 'loading' | 'stylizing' | 'encoding' | 'uploading' | 'downloading';
   value: number;
   total: number;
 };

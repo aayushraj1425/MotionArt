@@ -1,40 +1,76 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import * as FileSystem from 'expo-file-system/legacy';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { useAnimeProcessor } from '../processing/useAnimeProcessor';
 import { sampleFrames } from '../services/FrameSampler';
+import { processWithPython } from '../services/PythonProcessor';
+import { PrimaryButton } from '../components/PrimaryButton';
 import { theme } from '../theme';
-import { DEFAULT_OPTIONS, type PickedVideo, type ProcessResult } from '../types';
+import { type AnimeOptions, type PickedVideo, type ProcessResult, type ProcessingEngine, type PythonConnection, type ProcessProgress } from '../types';
 
-/** How many frames we sample across the clip. */
-const FRAME_COUNT = 20;
 
 const STAGE_LABEL: Record<string, string> = {
   loading: 'Reading frames',
   stylizing: 'Painting anime frames',
   encoding: 'Building your video',
+  uploading: 'Sending video to your computer',
+  downloading: 'Downloading video and frames',
 };
 
 type Props = {
+  engine: ProcessingEngine;
+  connection: PythonConnection;
   video: PickedVideo;
+  options: AnimeOptions;
   onDone: (result: ProcessResult) => void;
   onError: (message: string) => void;
 };
 
 /** Runs the pipeline end-to-end and shows live progress. */
-export function ProcessingScreen({ video, onDone, onError }: Props) {
+export function ProcessingScreen(props: Props) {
+  return props.engine === 'python' ? <PythonProcessingScreen {...props} /> : <DeviceProcessingScreen {...props} />;
+}
+
+function PythonProcessingScreen({ video, options, connection, onDone, onError }: Props) {
+  const [progress, setProgress] = useState<ProcessProgress | null>(null);
+  const [controller] = useState(() => new AbortController());
+  useEffect(() => {
+    let active = true;
+    processWithPython(video, options, connection, p => { if (active) setProgress(p); }, controller.signal)
+      .then(result => {
+        if (active) onDone(result);
+        else void FileSystem.deleteAsync(result.cacheDirectory ?? result.videoUri, { idempotent: true }).catch(() => {});
+      }).catch(error => { if (active) onError(error instanceof Error ? error.message : String(error)); });
+    return () => { active = false; controller.abort(); };
+  }, []);
+  const pct = progress && progress.total > 0 ? Math.min(1, progress.value / progress.total) : 0;
+  return <View style={styles.container}>
+    <Text style={styles.label}>{progress ? STAGE_LABEL[progress.stage] : 'Connecting to Python'}...</Text>
+    <View style={styles.track}><View style={[styles.fill, { width: `${Math.round(pct * 100)}%` }]} /></View>
+    {progress && <Text style={styles.count}>{progress.value} / {progress.total}</Text>}
+    <Text style={styles.hint}>OpenCV is running on your computer. Keep both devices connected.</Text>
+    <View style={{ marginTop: 24 }}><PrimaryButton title="Cancel" variant="ghost" onPress={() => controller.abort()} /></View>
+  </View>;
+}
+
+function DeviceProcessingScreen({ video, options, onDone, onError }: Props) {
+  const [sampling, setSampling] = useState({ value: 0, total: 1 });
   const { process, host, progress } = useAnimeProcessor();
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      let frameUris: string[] = [];
       try {
-        const frameUris = await sampleFrames(video, FRAME_COUNT);
+        frameUris = await sampleFrames(video, options, (value, total) => { if (!cancelled) setSampling({ value, total }); });
         if (cancelled) return;
-        const result = await process(frameUris, DEFAULT_OPTIONS);
+        const result = await process(frameUris, options);
         if (!cancelled) onDone(result);
       } catch (err) {
         if (!cancelled) onError(err instanceof Error ? err.message : String(err));
+      } finally {
+        await Promise.all(frameUris.map(uri => FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {})));
       }
     })();
     return () => {
@@ -44,8 +80,8 @@ export function ProcessingScreen({ video, onDone, onError }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const label = progress ? STAGE_LABEL[progress.stage] ?? 'Working' : 'Warming up';
-  const pct = progress && progress.total > 0 ? progress.value / progress.total : 0;
+  const label = progress ? STAGE_LABEL[progress.stage] ?? 'Working' : 'Reading video frames';
+  const pct = progress && progress.total > 0 ? progress.value / progress.total : sampling.value / sampling.total;
 
   return (
     <View style={styles.container}>

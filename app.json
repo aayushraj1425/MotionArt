@@ -12,7 +12,7 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Motion Art needs your library to pick a video to stylize.",
-        "NSPhotoLibraryAddUsageDescription": "Motion Art saves your generated frame to Photos."
+        "NSPhotoLibraryAddUsageDescription": "Motion Art saves your generated videos and frames to Photos."
       }
     },
     "android": {
@@ -33,7 +33,7 @@
       [
         "expo-media-library",
         {
-          "savePhotosPermission": "Motion Art saves your generated frame to Photos."
+          "savePhotosPermission": "Motion Art saves your generated videos and frames to Photos."
         }
       ],
       "expo-video",

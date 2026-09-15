@@ -1,20 +1,21 @@
 import { useVideoPlayer, VideoView } from 'expo-video';
 import React, { useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { FrameStrip } from '../components/FrameStrip';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { saveDataUrlToGallery } from '../services/GallerySaver';
+import { saveDataUrlToGallery, saveVideoToGallery } from '../services/GallerySaver';
 import { theme } from '../theme';
 import type { ProcessResult, StylizedFrame } from '../types';
 
 type Props = {
   result: ProcessResult;
   onRestart: () => void;
+  onAdjust: () => void;
 };
 
 /** Preview the generated video, then pick and save one frame. */
-export function ResultScreen({ result, onRestart }: Props) {
+export function ResultScreen({ result, onRestart, onAdjust }: Props) {
   const [selected, setSelected] = useState<StylizedFrame | null>(result.frames[0] ?? null);
   const [saving, setSaving] = useState(false);
 
@@ -23,12 +24,13 @@ export function ResultScreen({ result, onRestart }: Props) {
     p.play();
   });
 
-  const handleSave = async () => {
-    if (!selected) return;
+  const handleSave = async (video = false) => {
+    if (!video && !selected) return;
     try {
       setSaving(true);
-      await saveDataUrlToGallery(selected.dataUrl);
-      Alert.alert('Saved', 'The frame is now in your Photos.');
+      if (video) await saveVideoToGallery(result.videoUri);
+      else await saveDataUrlToGallery(selected!.dataUrl);
+      Alert.alert('Saved', video ? 'The video is now in your Photos / Gallery.' : 'The frame is now in your Photos / Gallery.');
     } catch (err) {
       Alert.alert('Motion Art', err instanceof Error ? err.message : String(err));
     } finally {
@@ -37,7 +39,7 @@ export function ResultScreen({ result, onRestart }: Props) {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.heading}>Your Motion Art</Text>
 
       <View style={styles.player}>
@@ -56,24 +58,28 @@ export function ResultScreen({ result, onRestart }: Props) {
         onSelect={setSelected}
       />
 
+      {selected && <Image source={{ uri: selected.dataUrl }} style={{ height: 220, width: '100%' }} resizeMode="contain" />}
+      <Text style={styles.section}>Silent video · {result.frames.length} processed frames</Text>
       <View style={styles.actions}>
+        <PrimaryButton title="Save video to gallery" onPress={() => handleSave(true)} loading={saving} />
         <PrimaryButton
           title="Save frame to gallery"
-          onPress={handleSave}
+          onPress={() => handleSave()}
           loading={saving}
-          disabled={!selected}
+          disabled={!selected || saving}
         />
-        <PrimaryButton title="Make another" variant="ghost" onPress={onRestart} />
+        <PrimaryButton title="Adjust style & try again" variant="ghost" disabled={saving} onPress={onAdjust} />
+        <PrimaryButton disabled={saving} title="Make another" variant="ghost" onPress={onRestart} />
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, gap: 16 },
+  container: { padding: 24, gap: 16 },
   heading: { color: theme.text, fontSize: 26, fontWeight: '800' },
   player: {
-    flex: 1,
+    height: 280,
     borderRadius: theme.radius,
     overflow: 'hidden',
     backgroundColor: '#000',

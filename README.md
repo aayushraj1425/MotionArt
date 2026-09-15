@@ -1,94 +1,124 @@
-# Motion Art 🎬
+# Motion Art
 
-Turn a short local video into **anime/cartoon-style motion**, entirely on-device.
-Pick a clip → frames are stylized and rebuilt into a real video → preview it →
-save any frame to your Photos. No servers, no uploads, no native build step.
+Turn a short video into anime-inspired cel shading with OpenCV. No LLM, AI model, cloud service, or external processing API.
 
-Built with **Expo (React Native)** so it runs in **Expo Go** — no Android
-Studio or Xcode required.
+## Run with Python OpenCV (default)
 
----
+Python runs on your **computer**. Expo Go runs on your **phone**. The phone sends your selected video to your computer over Wi-Fi and downloads the processed MP4 and PNG frames. Python cannot run directly inside Expo Go.
 
-## Run it
+### First-time setup
 
-You need [Node.js](https://nodejs.org) and the **Expo Go** app on your phone.
+From the project folder in PowerShell:
 
-```bash
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
 npm install
-npx expo install --fix   # aligns native module versions to your Expo SDK
-npx expo start
 ```
 
-- **iOS:** open the **Camera app**, point it at the QR code, then tap the
-  "Open in Expo Go" banner. (iOS Expo Go has no built-in QR scanner.)
-- **Android:** scan the QR directly from inside **Expo Go**.
+Python 3.11 is tested. The dependencies include a bundled FFmpeg executable for H.264 encoding; no separate FFmpeg installation is required. `backend/requirements.lock.txt` records the exact tested Python environment.
 
-> **Works on both iOS and Android.** Stylizing and encoding run entirely
-> on-device in a hidden WebView: canvas pixels feed an embedded WASM **H.264**
-> encoder that outputs a real **.mp4** — no `MediaRecorder`/`captureStream`
-> (unsupported in iOS WebViews) and no FFmpeg.
+### Start processing
 
----
+**Terminal 1 - Python:**
 
-## How it works
-
-The hard part of a hackathon "video app" is turning processed frames back into
-a *real video file* on-device — normally an FFmpeg job. Motion Art avoids any
-native dependency by borrowing the browser engine that already ships inside a
-`WebView`:
-
-1. **Pick** — `expo-image-picker` selects a local video (`VideoPicker`).
-2. **Sample** — `expo-video-thumbnails` grabs 20 frames spread across the clip
-   (`FrameSampler`).
-3. **Stylize + Encode** — a hidden `WebView` draws each frame to a `<canvas>`,
-   applies a cartoon filter (saturation boost → colour posterization → edge
-   outlines), then feeds the canvas pixels to an embedded WASM **H.264** encoder
-   that writes a real **.mp4** (`useAnimeProcessor` + `webviewSource` +
-   `encoderAsset`). This pixels-in / WASM-out path works identically on iOS and
-   Android — unlike `MediaRecorder`/`captureStream`, which iOS WebViews lack.
-4. **Preview** — `expo-video` plays the generated video (`ResultScreen`).
-5. **Save** — the chosen frame is written to Photos via `expo-media-library`
-   (`GallerySaver`).
-
-### Structure
-
-```
-App.tsx                       three-phase state machine (home → processing → result)
-src/
-  types.ts                    domain types + the AnimeProcessor contract
-  theme.ts                    shared style tokens
-  services/
-    VideoPicker.ts            pick a local video
-    FrameSampler.ts           video → N sampled frames
-    GallerySaver.ts           save a frame to Photos
-  processing/
-    webviewSource.ts          canvas cartoon filter + WASM H.264 encoder (runs in WebView)
-    encoderAsset.ts           loads the vendored WASM encoder from a bundled asset
-    useAnimeProcessor.tsx     RN⇄WebView bridge; fulfils the AnimeProcessor contract
-  components/
-    PrimaryButton.tsx
-    FrameStrip.tsx            tappable filmstrip of generated frames
-  screens/
-    HomeScreen.tsx
-    ProcessingScreen.tsx
-    ResultScreen.tsx
+```powershell
+.\.venv\Scripts\python.exe -m backend serve --host 0.0.0.0
 ```
 
-Each module has a single responsibility, and the screens depend on the
-`AnimeProcessor` **interface** — the WebView is an implementation detail that a
-native encoder could later replace without touching the UI.
+The terminal prints the computer's network addresses and a pairing code. Keep it running. The code changes whenever the processor restarts.
 
-### Tunables
+**Terminal 2 - Expo:**
 
-Look in `src/types.ts` → `DEFAULT_OPTIONS` (fps, posterization `levels`,
-`edgeThreshold`, `saturation`, `maxWidth`) and `FRAME_COUNT` in
-`ProcessingScreen.tsx`.
+```powershell
+npm start
+```
 
----
+Open the QR code in Expo Go. In Motion Art:
 
-## Known limits (it's a hackathon MVP)
+1. Select **Python on computer**.
+2. Enter the printed Wi-Fi address, such as `http://192.168.1.10:8000`, and the pairing code. Use the computer's address, not `localhost` or `0.0.0.0`.
+3. Pick the original video, choose **OpenCV anime**, and start with **2 seconds**, **720 resolution**, and **smoothing 1**.
+4. Tap **Create anime video**. Progress shows sending, processing, and downloading.
+5. Save the video or select and save any PNG frame to Photos / Gallery.
+6. Use **Adjust style & try again** to reprocess the same source with different settings.
 
-- Frames are sampled, not every-frame — motion is a stylized flip-book, by design.
-- Processing width is capped (`maxWidth`) to keep pure-JS pixel work snappy.
-- The WASM encoder adds a ~1.7 MB bundled asset (`assets/h264-mp4-encoder.web.txt`,
-  registered via `metro.config.js`); it loads once per session.
+Both devices must use the same reachable Wi-Fi network. If Windows asks, allow Python on your private network. Expo's `--tunnel` connects Expo only; the Python address must still be reachable from the phone. The service is for your local network, not public hosting.
+
+## Process images or videos directly with Python
+
+No phone or local web service is needed for these commands:
+
+```powershell
+.\.venv\Scripts\python.exe -m backend image "input.jpg" "output.png"
+.\.venv\Scripts\python.exe -m backend video "input.mp4" "output-folder"
+```
+
+The video command writes `video.mp4` and every processed `frame-0000.png`, etc. Choose a new output path; existing outputs are not overwritten. To customize either command, add `--options settings.json`. The JSON uses the same names as the app, for example:
+
+```json
+{
+  "clipSeconds": 2,
+  "maxWidth": 720,
+  "fps": 12,
+  "smoothing": 1,
+  "levels": 6,
+  "celStrength": 0.8,
+  "detail": 1,
+  "outlineStrength": 0.75,
+  "paletteStrength": 0.65
+}
+```
+
+Missing settings use the defaults from `backend/options.py`.
+
+## What Python changes
+
+- `backend/filters.py`: OpenCV `edgePreservingFilter` simplifies regions, `stylization` adds a painted appearance, Lab lightness quantization creates cel shadows, bounded detail restoration retains smaller features, and Canny traces contours. Warm highlights and cool shadows finish the palette.
+- `backend/pipeline.py`: OpenCV decodes the original video sequentially, resamples frames to the selected frame rate, processes frames, writes PNGs, and streams pixels to FFmpeg for H.264 MP4 encoding.
+- `backend/server.py`: local upload, progress, download, cancellation, and cleanup with a pairing code. One processing job runs at a time, with a small bounded queue.
+- `src/services/PythonProcessor.ts`: the phone connects, sends the clip, tracks progress, downloads results into its cache, and removes the remote job after download.
+
+No random per-frame color clustering is used. Fixed settings reduce palette changes between frames, though rapid lighting changes and fine textures may still flicker. Python is a platform for richer processing; changing language alone does not guarantee a better anime resemblance.
+
+## Phone-only option
+
+Select **Phone only** to keep the entire clip on the phone using the existing OpenCV.js 4.13.0 / WebView / WASM H.264 pipeline. It does not need a computer processor. Its smoothing and contour tools differ from Python's photo rendering tools, so the same parameters can look different.
+
+## Settings
+
+| Setting | Effect |
+| --- | --- |
+| Anime color palette | Warm highlights and cool blue shadows; zero keeps color balance. |
+| Keep fine details | Restores small local contrasts. Higher can also restore source noise. |
+| Anime shading strength | Higher produces more painted, flatter regions. Lower preserves more photographic tones. |
+| Texture smoothing | Higher removes more texture; takes longer. |
+| Shading bands | Fewer bands produce stronger cel shadows. |
+| Ink strength | Darkens contours; zero disables the extra outlines. Python stylization can still produce painted contours. |
+| Outline threshold | Higher suppresses weaker Canny edges. |
+| Color intensity | Boosts color; zero produces grayscale. |
+| Contrast | Deepens shadows and brightens highlights. |
+| Frames per second | 6, 12, or 24; higher is smoother and requires more processing. |
+| Resolution | Caps the longest side at 480, 640, 720, or 1080. |
+| First seconds to process | First 2, 5, or 10 seconds, or the whole clip if shorter. |
+
+## Output and limits
+
+- Exports are **silent** and process at most the first **10 seconds**.
+- The Python service accepts videos up to **250 MB**. Keep the app, Python terminal, and network connection active during transfer and processing.
+- This is classical image processing. It preserves the original face and scene geometry; it cannot redraw a person as an anime character or recover details missing from a blurry input.
+- Video timing uses the decoder's reported frame rate. Variable-frame-rate or damaged videos may not reproduce exact source timing.
+- Server inputs are removed after processing. Results are removed after successful phone download or cancellation; idle completed jobs expire after an hour when another upload arrives. Normal server shutdown removes jobs still tracked in the session. A forced shutdown can leave files in ignored `backend/.jobs/`.
+- Downloaded results stay in phone cache until replaced or dismissed. Gallery copies persist separately.
+
+## Tests
+
+```powershell
+npm test
+npm run typecheck
+.\.venv\Scripts\python.exe -m unittest backend.test_processing -v
+```
+
+Tests cover native OpenCV output, detail retention, grayscale, bounds validation, actual video encode/decode, timing, cancellation, upload/download, pairing, cleanup, phone-side downloaded files, and the original OpenCV.js pipeline. Native phone networking, playback, gallery permissions, and visual quality on your footage still require a device check.
+
+OpenCV.js license and source checksum are in `assets/OPENCV-NOTICE.md`. Python OpenCV: https://docs.opencv.org/4.x/df/dac/group__photo__render.html

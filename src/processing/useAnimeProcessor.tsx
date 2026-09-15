@@ -10,6 +10,7 @@ import type {
   StylizedFrame,
 } from '../types';
 import { loadEncoderSource } from './encoderAsset';
+import { loadOpenCvSource } from './openCvAsset';
 import { buildWebViewHtml } from './webviewSource';
 
 // react-native-webview types WebView as a generic class whose default type
@@ -42,6 +43,17 @@ export function useAnimeProcessor(): ProcessorHandle {
   const pending = useRef<Pending | null>(null);
   const queuedJs = useRef<string | null>(null);
   const ready = useRef(false);
+  const sourceUris = useRef<string[]>([]);
+  const outputFrames = useRef<StylizedFrame[]>([]);
+  const watchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearWatchdog = () => { if (watchdog.current) clearTimeout(watchdog.current); };
+  const armWatchdog = () => {
+    clearWatchdog();
+    watchdog.current = setTimeout(() => {
+      pending.current?.reject(new Error('Processing stopped responding. Try a shorter clip or lower resolution.'));
+      pending.current = null;
+    }, 120000);
+  };
   const [progress, setProgress] = useState<ProcessProgress | null>(null);
   const [html, setHtml] = useState<string | null>(null);
   const loadError = useRef<Error | null>(null);
@@ -49,9 +61,9 @@ export function useAnimeProcessor(): ProcessorHandle {
   // Load the WASM encoder once, then build the WebView document around it.
   useEffect(() => {
     let cancelled = false;
-    loadEncoderSource()
-      .then((source) => {
-        if (!cancelled) setHtml(buildWebViewHtml(source));
+    Promise.all([loadEncoderSource(), loadOpenCvSource()])
+      .then(([source, openCvSource]) => {
+        if (!cancelled) setHtml(buildWebViewHtml(source, openCvSource));
       })
       .catch((err) => {
         const error = err instanceof Error ? err : new Error(String(err));
@@ -62,16 +74,25 @@ export function useAnimeProcessor(): ProcessorHandle {
       });
     return () => {
       cancelled = true;
+      clearWatchdog();
+      pending.current?.reject(new Error('Processing cancelled.'));
+      pending.current = null;
+      queuedJs.current = null;
+      sourceUris.current = [];
+      outputFrames.current = [];
     };
   }, []);
 
   const finish = useCallback(() => {
+    clearWatchdog();
+    sourceUris.current = [];
+    outputFrames.current = [];
     pending.current = null;
     setProgress(null);
   }, []);
 
   const onResult = useCallback(
-    async (video: string, frameUrls: string[]) => {
+    async (video: string) => {
       const p = pending.current;
       if (!p) return;
       try {
@@ -79,10 +100,7 @@ export function useAnimeProcessor(): ProcessorHandle {
         await FileSystem.writeAsStringAsync(videoUri, video, {
           encoding: FileSystem.EncodingType.Base64,
         });
-        const frames: StylizedFrame[] = frameUrls.map((dataUrl, i) => ({
-          id: String(i),
-          dataUrl,
-        }));
+        const frames = [...outputFrames.current];
         p.resolve({ videoUri, frames });
       } catch (err) {
         p.reject(err instanceof Error ? err : new Error(String(err)));
@@ -95,7 +113,9 @@ export function useAnimeProcessor(): ProcessorHandle {
 
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
-      const msg = JSON.parse(event.nativeEvent.data);
+      let msg;
+      try { msg = JSON.parse(event.nativeEvent.data); } catch { return; }
+      if (pending.current) armWatchdog();
       switch (msg.type) {
         case 'ready':
           ready.current = true;
@@ -104,13 +124,26 @@ export function useAnimeProcessor(): ProcessorHandle {
             queuedJs.current = null;
           }
           return;
+        case 'requestFrame': {
+          const uri = sourceUris.current[msg.index];
+          if (!uri || !pending.current) return;
+          FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 })
+            .then(b64 => {
+              if (pending.current) webRef.current?.injectJavaScript(`window.MotionArt.acceptFrame(${JSON.stringify('data:image/jpeg;base64,' + b64)}); true;`);
+            }).catch(err => { pending.current?.reject(new Error(String(err))); finish(); });
+          return;
+        }
+        case 'frame':
+          if (pending.current) outputFrames.current.push({ id: String(msg.index), dataUrl: msg.dataUrl });
+          return;
         case 'progress':
           setProgress({ stage: msg.stage, value: msg.value, total: msg.total });
           return;
         case 'result':
-          onResult(msg.video, msg.frames);
+          onResult(msg.video);
           return;
         case 'error':
+          if (!ready.current) loadError.current = new Error(msg.message);
           pending.current?.reject(new Error(msg.message));
           finish();
           return;
@@ -133,30 +166,13 @@ export function useAnimeProcessor(): ProcessorHandle {
         pending.current = { resolve, reject };
         setProgress({ stage: 'loading', value: 0, total: frameUris.length });
 
-        // The WebView can't read file:// URIs, so hand it self-contained data URLs.
-        Promise.all(
-          frameUris.map(async (uri) => {
-            const b64 = await FileSystem.readAsStringAsync(uri, {
-              encoding: FileSystem.EncodingType.Base64,
-            });
-            return `data:image/jpeg;base64,${b64}`;
-          }),
-        )
-          .then((dataUrls) => {
-            const payload = JSON.stringify({ frames: dataUrls, options });
-            const js = `window.MotionArt && window.MotionArt.run(${payload}); true;`;
-            if (ready.current) {
-              webRef.current?.injectJavaScript(js);
-            } else {
-              // The engine mounts once the encoder finishes loading; run then.
-              queuedJs.current = js;
-            }
-          })
-          .catch((err) => {
-            pending.current = null;
-            setProgress(null);
-            reject(err instanceof Error ? err : new Error(String(err)));
-          });
+        sourceUris.current = frameUris;
+        outputFrames.current = [];
+        armWatchdog();
+        const payload = JSON.stringify({ frameCount: frameUris.length, options });
+        const js = `window.MotionArt && window.MotionArt.run(${payload}); true;`;
+        if (ready.current) webRef.current?.injectJavaScript(js);
+        else queuedJs.current = js;
       }),
     [],
   );
@@ -173,6 +189,9 @@ export function useAnimeProcessor(): ProcessorHandle {
           javaScriptEnabled
           domStorageEnabled
           onMessage={onMessage}
+          onError={() => { pending.current?.reject(new Error('The processing engine could not load.')); finish(); }}
+          onContentProcessDidTerminate={() => { pending.current?.reject(new Error('The processing engine ran out of memory. Try lower resolution.')); finish(); }}
+          onRenderProcessGone={() => { pending.current?.reject(new Error('The processing engine stopped. Try a shorter clip.')); finish(); }}
           // Kept in the tree but invisible and non-interactive.
           style={{ position: 'absolute', width: 1, height: 1, opacity: 0 }}
           pointerEvents="none"
