@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "Motion Art",
+    "slug": "motion-art",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Motion Art needs your library to pick a video to stylize.",
+        "NSPhotoLibraryAddUsageDescription": "Motion Art saves your generated frame to Photos."
+      }
+    },
+    "android": {
+      "package": "com.motionart.app",
+      "permissions": [
+        "READ_MEDIA_VIDEO",
+        "READ_MEDIA_IMAGES",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Motion Art needs your library to pick a video to stylize."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "Motion Art saves your generated frame to Photos."
+        }
+      ],
+      "expo-video",
+      "expo-asset"
+    ]
+  }
+}
